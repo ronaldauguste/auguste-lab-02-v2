@@ -1,0 +1,201 @@
+
+#loading libraries and data
+library(tidyverse)
+library(psych)
+library(readxl)
+library(gt)
+library(janitor)
+
+Attachment_Anxiety_Data <- read_excel("./Attachment_Anxiety_Data.xlsx")
+
+#cleaning and mutating data
+Attachment_Anxiety_Data_clean <- Attachment_Anxiety_Data |> 
+  mutate(
+    Gender = factor(Gender,
+                    levels = c(1,2),
+                    labels = c("male", "female")),
+    `Age group` = factor(`Age group`,
+                         levels = c(1:5),
+                         labels = c("18-24", "24-34", "35-44", "45-54", "55-64")),
+    Relationship = factor(Relationship,
+                          levels = c(1, 2, 4, 5, 6, 7),
+                          labels = c("married", "in a relationship", "divorced", "in a relationship", "never been in a relationship", "prefer not to                           say" )),
+    Ethnicity = factor(Ethnicity,
+                       levels = c(1, 2, 5, 6),
+                       labels = c("white/Caucasian", "Asian/Asian British", "Other ethnic group", "prefer not to say"))
+  ) |> 
+  mutate(across(c(SA_1:SA_20, AA_1:AA_9, SEst_1:SEst_10), as.integer)) 
+#cleaning process: added informative labels to demographics and converted to 
+#factor (extra step but probably useful for later analyses); converted all 
+#surveys columns to integer (separated each survey for clarity)
+
+#creating answer keys using list()
+SA_keys <- list(Social_Interaction_Anxiety = c("SA_1","SA_2","SA_3","SA_4",
+                                               "-SA_5","SA_6","SA_7","SA_8",
+                                               "-SA_9","SA_10","-SA_11",
+                                               "SA_12","SA_13","SA_14",
+                                               "SA_15","SA_16","SA_17",
+                                               "SA_18","SA_19","SA_20")
+)
+AA_keys <- list(Attachment_Anxiety = c("AA_1","AA_2","AA_3","AA_4","AA_5",
+                                       "AA_6","AA_7","AA_8","AA_9")
+)
+SEst_keys <- list(Self_Esteem = c("SEst_1","-SEst_2","SEst_3","SEst_4",
+                                  "-SEst_5","-SEst_6","SEst_7","-SEst_8",
+                                  "-SEst_9","SEst_10")
+)
+
+
+#computing Cronbach's alpha etc for each scale
+SA_scores <- scoreItems(SA_keys, Attachment_Anxiety_Data_clean, totals = F, min = 1, max = 5)
+
+AA_scores <- scoreItems(AA_keys, Attachment_Anxiety_Data_clean, totals = F, min = 1, max = 7)
+
+SEst_scores <- scoreItems(SEst_keys, Attachment_Anxiety_Data_clean, totals = F, min = 1, max = 4)
+
+#converting lists to dataframes
+SA_scores.df <- as.data.frame(SA_scores$scores)
+AA_scores.df <- as.data.frame(AA_scores$scores)
+SEst_scores.df <- as.data.frame(SEst_scores$scores)
+
+#combining dataframes
+Allscores.df <- cbind(SA_scores.df, AA_scores.df, SEst_scores.df)
+
+Attachment_Anxiety_wAverages <- cbind(Attachment_Anxiety_Data_clean, Allscores.df)
+
+#reducing dataframe
+Attachment_Anxiety_Reduced <- select(Attachment_Anxiety_wAverages, URN, Gender, 
+                                     `Age group`, Relationship, Ethnicity, 
+                                     Social_Interaction_Anxiety, 
+                                     Attachment_Anxiety, Self_Esteem) |> 
+  mutate_if(is.numeric, round, 2)
+
+
+#creating demographic table
+demographic_table <- Attachment_Anxiety_Reduced |> 
+  tabyl(Gender, `Age group`)
+
+gttable.1 <- demographic_table |>
+  gt() |>
+  tab_header(
+    title = md("*Distribution of Males and Females by Age Group*")
+  )
+
+#creating score table
+summary <-  Attachment_Anxiety_Reduced |> 
+ select(Social_Interaction_Anxiety, Attachment_Anxiety, Self_Esteem) |> 
+  describe()
+summary
+
+#extracting sample size
+n <- (summary)[1,2]
+# n <- (describe(Attachment_Anxiety_Reduced))[1,2]
+
+#creating a "Scales" column and adding it to summary
+Scales <- c("Social Interaction Anxiety", "Attachment Anxiety", "Self Esteem")
+summary$Scales <- Scales
+#n.b. code works, but viewing "summary" after adding "Scales" throws this error:
+#Error in Math.data.frame(list(vars = 1:3, n = c(63, 63, 63), mean = c(2.68888888888889,  : 
+#non-numeric-alike variable(s) in data frame: Scales
+#This is why (from Claude.ai):
+#Your code is fine. The problem is in viewing or printing the result.
+#summary$Scales <- Scales works: the new column is added without any error. The 
+#trouble is that describe() returns an object with the class "psych/describe" on 
+#top of data.frame, and when you print or view it, psych's print method calls 
+#round() on the whole object. round() goes through Math.data.frame, which refuses 
+#to run if any column is non-numeric. Your character column Scales triggers that, 
+#and that's the error you saw.
+
+#creating a score table
+alphas <- round(c(
+  SA_scores$alpha,
+  AA_scores$alpha,
+  SEst_scores$alpha
+), 2)
+
+#selecting variables from summary table
+summary_reduced <- summary |> 
+  select(Scales, mean, median, sd, range) |> 
+  mutate_if(is.numeric, round, 2)
+
+#reduced summary table with alphas
+summaries_w_alphas <- cbind(summary_reduced, alphas)
+
+#creating reproducible table with gt()
+gttable.2 <- gt(summaries_w_alphas) |>
+  tab_header(
+    title = md("*Descriptive Statistics for Attachment and Social Anxiety Scales*")) |>
+  tab_stubhead(label= "Composites")|>
+  tab_spanner(
+    label="Central Tendency",
+    columns = c(mean, median)
+  )|>
+  tab_spanner(
+    label="Variability",
+    columns = c(sd, range)
+  )|>
+  tab_spanner(
+    label="Reliability Values (Chronbach's alpha)",
+    columns = c(alphas)
+  ) 
+  
+#filtering for Asian/Asian British only
+Attachment_Anxiety_Reduced_Asian <- Attachment_Anxiety_Reduced |> 
+  filter(Ethnicity == "Asian/Asian British")
+#n.b. filter only worked for label "Asian/Asian British", not level "2"
+
+#filtered score table
+#creating score table
+summary_Asian <-  Attachment_Anxiety_Reduced_Asian |> 
+  select(Social_Interaction_Anxiety, Attachment_Anxiety, Self_Esteem) |> 
+  describe()
+summary_Asian
+
+#extracting sample size
+n_Asian <- (summary_Asian)[1,2]
+# n_Asian <- (describe(Attachment_Anxiety_Reduced_Asian))[1,2]
+
+#using previous "Scales" column and adding it to summary_Asian
+
+summary_Asian$Scales <- Scales
+#n.b. see previous note about "error"
+
+#creating a score table
+#alphas created during equivalent step with unfiltered data
+
+#selecting variables from summary table
+summary_Asian_reduced <- summary_Asian |> 
+  select(Scales, mean, median, sd, range) |> 
+  mutate_if(is.numeric, round, 2)
+
+#reduced summary table with alphas
+summaries_Asian_w_alphas <- cbind(summary_Asian_reduced, alphas)
+
+#creating reproducible table with gt()
+gttable.2.Asian <- gt(summaries_Asian_w_alphas) |>
+  tab_header(
+    title = md("*Descriptive Statistics for Attachment and Social Anxiety Scales*")) |>
+  tab_stubhead(label= "Composites")|>
+  tab_spanner(
+    label="Central Tendency",
+    columns = c(mean, median)
+  )|>
+  tab_spanner(
+    label="Variability",
+    columns = c(sd, range)
+  )|>
+  tab_spanner(
+    label="Reliability Values (Chronbach's alpha)",
+    columns = c(alphas)
+  ) |> 
+  tab_footnote(
+    footnote = md("*Descriptives for Asian/British Asian participants*"),
+    locations = cells_title(groups = "title")
+    ) |> 
+      tab_style(
+        style = cell_text(align = "right"),
+        locations = cells_footnotes()
+  )|>
+  tab_options(
+    table.border.bottom.style = "none"
+  )
